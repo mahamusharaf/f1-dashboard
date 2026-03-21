@@ -1,0 +1,11 @@
+node_modules/
+.env
+backend/venv/
+backend/__pycache__/
+backend/*.pyc
+backend/*.db
+backend/f1_cache/
+backend/2026_drivers.txt
+backend/2026_drivers_utf8.txt
+backend/driver_data_output.txt
+backend/verification_results.txt

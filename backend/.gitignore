@@ -1,0 +1,10 @@
+venv/
+__pycache__/
+*.pyc
+*.db
+.env
+f1_cache/
+2026_drivers.txt
+2026_drivers_utf8.txt
+driver_data_output.txt
+verification_results.txt
