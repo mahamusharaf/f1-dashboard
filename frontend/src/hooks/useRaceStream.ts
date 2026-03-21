@@ -35,7 +35,7 @@ export function useRaceStream() {
   const connect = useCallback(() => {
     clearState(); // Clear any stale data from previous races
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/api/race/live`;
+    const wsUrl = import.meta.env.VITE_WS_URL || `${protocol}//${window.location.host}/api/race/live`;
     
     const socket = new WebSocket(wsUrl);
 

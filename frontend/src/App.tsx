@@ -27,7 +27,7 @@ const App: React.FC = () => {
 
   const fetchSchedule = async () => {
     try {
-      const res = await fetch(`/api/races/schedule?year=${year}`);
+      const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/races/schedule?year=${year}`);
       if (res.ok) {
         const data = await res.json();
         setSchedule(data.races);
@@ -48,7 +48,7 @@ const App: React.FC = () => {
     setLoading(true);
     setStatusMsg(`Initializing ${year} R${round}...`);
     try {
-      const res = await fetch(`/api/races/load?year=${year}&race_round=${round}`, { method: 'POST' });
+      const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/races/load?year=${year}&race_round=${round}`, { method: 'POST' });
       if (res.ok) {
         const data = await res.json();
         clearState(); // Clear stale data
@@ -71,7 +71,7 @@ const App: React.FC = () => {
     const isResuming = raceState.events.length > 0 || raceState.leaderboard.length > 0;
     setStatusMsg(isResuming ? 'Resuming stream...' : 'Starting stream...');
     try {
-      const res = await fetch('/api/stream/start', { method: 'POST' });
+      const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/stream/start`, { method: 'POST' });
       if (res.ok) {
         setStatusMsg(isResuming ? 'Stream resumed!' : 'Stream started!');
       } else {
@@ -159,7 +159,7 @@ const App: React.FC = () => {
             <button
               onClick={async (e) => {
                 e.stopPropagation();
-                await fetch('/api/stream/pause', { method: 'POST' });
+                await fetch(`${import.meta.env.VITE_API_URL || ''}/api/stream/pause`, { method: 'POST' });
                 setRaceState(prev => ({ ...prev, isStreamActive: false }));
                 setStatusMsg('Stream paused');
               }}
