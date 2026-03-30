@@ -70,3 +70,15 @@ def focus_driver(code: str):
 @router.get("/analysis/lap/{num}")
 def get_lap_analysis(num: int):
     return {"lap": num, "analysis": {}}
+
+@router.post("/races/load")
+def load_race(year: int = 2023, race_round: int = 1):
+    import traceback
+    try:
+        orchestrator.initialize_race(year, race_round)
+        return {"status": "loaded", "session_id": orchestrator.session_id, "total_laps": orchestrator.total_laps}
+    except Exception as e:
+        print(f"[LOAD ERROR] {str(e)}")
+        traceback.print_exc()
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
