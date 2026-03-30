@@ -41,7 +41,6 @@ class RaceOrchestrator:
         self.race_round = race_round
         self.session_id = f"{year}_{race_round}_Race"
         
-        # Load FastF1 Session (synchronous but we'll assume it's okay for initialization)
         fastf1.Cache.enable_cache('f1_cache')
         try:
             self.session = fastf1.get_session(year, race_round, 'R')
@@ -52,7 +51,13 @@ class RaceOrchestrator:
             raise ValueError(f"Race data not available for {year} Round {race_round}. This event might not have occurred yet.")
         
         self.all_laps = self.session.laps
-        self.total_laps = int(self.all_laps['LapNumber'].max())
+
+        # Safe total_laps extraction
+        lap_max = self.all_laps['LapNumber'].dropna().max()
+        self.total_laps = int(lap_max) if not pd.isna(lap_max) else 0
+        if self.total_laps == 0:
+            raise ValueError(f"No lap data found for {year} Round {race_round}.")
+
         self.drivers = self.session.drivers
         
         # Pre-cache team colors and logos
@@ -64,11 +69,10 @@ class RaceOrchestrator:
             # Color
             color = row['TeamColor']
             if not color or pd.isna(color):
-                # Fallback for New 2026 Teams
                 if "audi" in team_name.lower():
-                    color = "F50117" # Audi Red
+                    color = "F50117"
                 elif "cadillac" in team_name.lower():
-                    color = "909090" # Cadillac Gray
+                    color = "909090"
                 else:
                     color = "FFFFFF"
             self.team_colors[abbr] = f"#{color}"
@@ -78,12 +82,15 @@ class RaceOrchestrator:
             
             # Store final status for DNF detection
             self.driver_results[abbr] = row['Status']
-            self.driver_total_laps[abbr] = row['Laps'] if not pd.isna(row['Laps']) else self.total_laps
+
+            # Safe laps column extraction
+            laps_col = 'NumberOfLaps' if 'NumberOfLaps' in row.index else 'Laps'
+            laps_val = row[laps_col] if laps_col in row.index and not pd.isna(row[laps_col]) else self.total_laps
+            self.driver_total_laps[abbr] = int(laps_val)
             
             # Cache driver image URL from FastF1 metadata
             if 'HeadshotUrl' in row and not pd.isna(row['HeadshotUrl']):
                 url = row['HeadshotUrl']
-                # Clean URL to get higher resolution (this returns 404 for rookies without high-res shots, but we handle them via overrides)
                 if '.transform/' in url:
                     url = url.split('.transform/')[0]
                 self.driver_images[abbr] = url
@@ -92,7 +99,6 @@ class RaceOrchestrator:
             try:
                 tel = self.all_laps.pick_driver(abbr).get_telemetry()
                 if not tel.empty:
-                    # Use SessionTime for consistency with current_virtual_time
                     self.driver_max_times[abbr] = tel['SessionTime'].max()
                 else:
                     self.driver_max_times[abbr] = self.all_laps['Time'].max()
@@ -124,7 +130,7 @@ class RaceOrchestrator:
         if not self.is_initialized:
             raise ValueError("Race not initialized")
         if self.is_active:
-            return  # Already running
+            return
         self.is_active = True
         asyncio.create_task(self._race_loop())
 
@@ -134,16 +140,12 @@ class RaceOrchestrator:
     async def _race_loop(self):
         """Background loop - streams real F1 data using a global session clock."""
         try:
-            # 1. Prepare data
             all_laps = self.all_laps
             
-            # Use driver abbreviations for consistent tracking
             driver_codes = self.session.results['Abbreviation'].tolist()
             
-            # Start/End times for the whole race
             start_time = all_laps['Time'].min() - all_laps['LapTime'].dropna().iloc[0]
             
-            # Use the winner's finish time as the ultimate end_time to avoid "Lap 58"
             winner_abbr = self.session.results.iloc[0]['Abbreviation']
             winner_laps = all_laps.pick_driver(winner_abbr)
             end_time = winner_laps['Time'].max()
@@ -151,30 +153,24 @@ class RaceOrchestrator:
             if self.current_virtual_time is None:
                 self.current_virtual_time = start_time
             
-            # Virtual session clock (already initialized in initialize_race)
             time_step = datetime.timedelta(seconds=1)
             
-            # Pre-fetch and normalize telemetry for all drivers
             driver_telemetries = {}
             for driver in driver_codes:
                 try:
-                    # Get all telemetry for this driver for the session
                     tel = self.session.laps.pick_driver(driver).get_telemetry()
                     if not tel.empty:
                         driver_telemetries[driver] = tel
                 except Exception:
                     continue
 
-            # Track length for progress calculation
             try:
                 track_length = self.session.laps.pick_fastest().get_telemetry()['Distance'].max()
             except:
-                track_length = 5000 # Fallback
+                track_length = 5000
 
-            # State tracking
             last_lap_completed = {d: 0 for d in driver_codes}
             last_pos = {}
-            # Track stint changes for pit stop detection
             last_stint = {d: 1 for d in driver_codes}
             
             print(f"[Orchestrator] Starting simulation from {self.current_virtual_time} to {end_time}")
@@ -184,7 +180,6 @@ class RaceOrchestrator:
                 positions = {}
 
                 for driver_code in driver_codes:
-                    # TRY TO GET TELEMETRY POINT
                     point = None
                     if driver_code in driver_telemetries:
                         tel = driver_telemetries[driver_code]
@@ -192,29 +187,23 @@ class RaceOrchestrator:
                         if mask.any():
                             point = tel[mask].iloc[-1]
                     
-                    # CURRENT LAP & PROGRESS
                     driver_laps = all_laps[all_laps['Driver'] == driver_code]
                     current_lap_data = driver_laps[driver_laps['Time'] <= self.current_virtual_time]
                     lap_num = len(current_lap_data) + 1
                     
-                    # Calculate progress on current lap
-                    # Fallback for missing Distance: Use SessionTime percentage if possible
                     visual_progress = 0.0
                     try:
                         if point is not None and not pd.isna(point.get('Distance')):
                             visual_progress = (point['Distance'] % track_length) / track_length
                         else:
-                            # Time-based Fallback
                             lap_start = driver_laps.iloc[lap_num-2]['Time'] if lap_num > 1 else start_time
                             lap_end = driver_laps.iloc[lap_num-1]['Time'] if lap_num <= len(driver_laps) else end_time
                             total_lap_duration = (lap_end - lap_start).total_seconds()
                             current_duration = (self.current_virtual_time - lap_start).total_seconds()
                             visual_progress = min(0.99, max(0.0, current_duration / total_lap_duration))
                     except:
-                        visual_progress = 0.5 
+                        visual_progress = 0.5
 
-                    # COMBINED SORTING DISTANCE
-                    # Use (lap * track_length) + (progress * track_length) for robust sorting
                     sorting_distance = (lap_num * track_length) + (visual_progress * track_length)
 
                     driver_updates.append({
@@ -231,11 +220,7 @@ class RaceOrchestrator:
                     await asyncio.sleep(0.05)
                     continue
 
-                # SORT BY TOTAL DISTANCE to get live standings
-                # We prioritize active/finished drivers over retired ones
                 def standing_sort_key(d_info):
-                    # We need to compute status here briefly to sort correctly
-                    # or better, just calculate status first for all
                     d_code = d_info['driver']
                     max_t = self.driver_max_times.get(d_code, end_time)
                     res_laps = self.driver_total_laps.get(d_code, self.total_laps)
@@ -255,12 +240,10 @@ class RaceOrchestrator:
                     driver_code = d['driver']
                     lap_data = d['lap_data']
                     
-                    # Ensure color is valid hex
                     raw_color = self.team_colors.get(driver_code, "#FFFFFF")
                     if not raw_color.startswith("#"):
                         raw_color = f"#{raw_color}"
                     
-                    # Determine status (consistent with the sort key)
                     max_time = self.driver_max_times.get(driver_code, end_time)
                     result_laps = self.driver_total_laps.get(driver_code, self.total_laps)
                     is_past_telemetry = self.current_virtual_time > max_time + datetime.timedelta(seconds=20)
@@ -270,26 +253,22 @@ class RaceOrchestrator:
                     if (is_past_telemetry or is_past_result_laps) and d['lap'] < self.total_laps:
                         status = self.driver_results.get(driver_code, "DNF")
                         if "Finished" in status or "Lap" in status:
-                             status = "Running"
+                            status = "Running"
                     elif d['lap'] >= self.total_laps:
                         status = "Finished"
 
-                    # Final safeguard
                     if d['lap'] <= result_laps and self.current_virtual_time <= max_time:
                         status = "Running"
 
-                    # Only include on track map if running and we have coordinates
                     if (status == "Running" or status == "Finished") and d.get('point') is not None:
-                         # Ensure X and Y are not NaN
-                         if not pd.isna(d['point'].get('X')) and not pd.isna(d['point'].get('Y')):
-                             positions[driver_code] = {
+                        if not pd.isna(d['point'].get('X')) and not pd.isna(d['point'].get('Y')):
+                            positions[driver_code] = {
                                 "x": d['point']['X'],
                                 "y": d['point']['Y'],
                                 "driver": driver_code,
                                 "team_color": raw_color
                             }
                     
-                    # Lap transition detection
                     if d['lap'] > last_lap_completed[driver_code]:
                         if d['lap'] <= self.total_laps:
                             if d['lap'] > 1:
@@ -313,7 +292,6 @@ class RaceOrchestrator:
                             ))
                         last_lap_completed[driver_code] = d['lap']
 
-                    # Overtake event
                     if driver_code in last_pos and pos < last_pos[driver_code]:
                         events.append(EventMessage(
                             event_type=EventType.OVERTAKE,
@@ -323,7 +301,6 @@ class RaceOrchestrator:
                         ))
                     last_pos[driver_code] = pos
 
-                    # Pit Stop detection (Stint change)
                     current_stint = int(lap_data['Stint']) if not pd.isna(lap_data['Stint']) else 1
                     if current_stint > last_stint[driver_code]:
                         events.append(EventMessage(
@@ -351,16 +328,13 @@ class RaceOrchestrator:
                         lap_progress=round(d['progress'], 3)
                     ))
 
-                # Persist state for pause/resume
                 self.last_timing = timing
                 self.last_events.extend(events)
                 if len(self.last_events) > 100:
                     self.last_events = self.last_events[-100:]
 
-                # Lead driver determines current session lap (capped at total_laps)
                 self.current_lap = min(driver_updates[0]['lap'], self.total_laps)
                 
-                # Check for Race Finish (All drivers done)
                 all_done = True
                 for t in timing:
                     if t.status == "Running":
@@ -369,11 +343,9 @@ class RaceOrchestrator:
                 
                 if all_done and len(timing) > 0:
                     self.is_finished = True
-                    self.is_active = False # Stop the loop
+                    self.is_active = False
                 
-                # Check for Radio Messages
                 if hasattr(self.session, 'messages') and not self.session.messages.empty:
-                    # Filter messages in the current window
                     new_messages = self.session.messages[
                         (self.session.messages['Time'] > self.current_virtual_time - time_step) & 
                         (self.session.messages['Time'] <= self.current_virtual_time)
@@ -386,7 +358,6 @@ class RaceOrchestrator:
                             lap=self.current_lap
                         ))
                 
-                # Build and broadcast
                 update = LapUpdate(
                     lap_number=self.current_lap,
                     events=events,
@@ -405,7 +376,6 @@ class RaceOrchestrator:
 
                 await manager.broadcast(update.model_dump_json())
                 
-                # Advance clock and simulation beat
                 self.current_virtual_time += time_step
                 await asyncio.sleep(0.2)
 
@@ -415,9 +385,7 @@ class RaceOrchestrator:
             traceback.print_exc()
         finally:
             self.is_active = False
-            # Send one last update to signal the end of active streaming
             try:
-                # IMPORTANT: Keep the last known timing/events so they don't disappear on pause!
                 final_events = []
                 if self.is_finished:
                     winner_name = self.last_timing[0].driver if self.last_timing else "N/A"
@@ -451,20 +419,16 @@ class RaceOrchestrator:
     def _generate_circuit_path(self):
         """Generates a high-fidelity SVG path from the fastest lap's telemetry."""
         try:
-            # Pick fastest lap for path generation
             fastest_lap = self.all_laps.pick_fastest()
             tel = fastest_lap.get_telemetry()
             
-            # Normalize coordinates to 400x400
             x_min, x_max = tel.X.min(), tel.X.max()
             y_min, y_max = tel.Y.min(), tel.Y.max()
             
             width = x_max - x_min
             height = y_max - y_min
-            # Increase margin by reducing scale (320 instead of 350)
             scale = 320 / max(width, height)
             
-            # Center the path
             x_offset = (400 - width * scale) / 2
             y_offset = (400 - height * scale) / 2
             
@@ -486,8 +450,6 @@ class RaceOrchestrator:
             self.circuit_info = get_circuit_for_session(self.year, self.race_round)
 
     def _get_team_logo_url(self, team_name: str) -> str:
-        """Maps team names' to high-quality colored emblems from TheSportsDB."""
-        # Mapping for the current era teams (colored emblems)
         mapping = {
             "Mercedes": "https://r2.thesportsdb.com/images/media/team/badge/6caw0r1744037679.png",
             "Ferrari": "https://r2.thesportsdb.com/images/media/team/badge/rxwsqv1420417429.png",
@@ -500,23 +462,21 @@ class RaceOrchestrator:
             "Alpha Tauri": "https://r2.thesportsdb.com/images/media/team/badge/ot7pjx1740775883.png",
             "Alfa Romeo": "https://r2.thesportsdb.com/images/media/team/badge/oyvepw1744380153.png",
             "Williams": "https://r2.thesportsdb.com/images/media/team/badge/fp1cil1740776050.png",
-            "Sauber": "https://r2.thesportsdb.com/images/media/team/badge/oyvepw1744380153.png", # Fallback for Sauber/Stake
-            "Racing Bulls": "https://r2.thesportsdb.com/images/media/team/badge/ot7pjx1740775883.png" # Fallback for VCARB
+            "Sauber": "https://r2.thesportsdb.com/images/media/team/badge/oyvepw1744380153.png",
+            "Racing Bulls": "https://r2.thesportsdb.com/images/media/team/badge/ot7pjx1740775883.png"
         }
         
-        # Default fallback
         url = ""
         team_name_lower = team_name.lower()
         
-        # 2026 specific rebrands
         if "audi" in team_name_lower:
             url = "https://cdn.simpleicons.org/audi/FFFFFF"
         elif "cadillac" in team_name_lower:
             url = "https://cdn.simpleicons.org/cadillac/FFFFFF"
         elif "stake" in team_name_lower or "kick" in team_name_lower:
-            url = "https://r2.thesportsdb.com/images/media/team/badge/oyvepw1744380153.png" # Stake F1
+            url = "https://r2.thesportsdb.com/images/media/team/badge/oyvepw1744380153.png"
         elif "visa" in team_name_lower or "cash" in team_name_lower or "vcarb" in team_name_lower:
-            url = "https://r2.thesportsdb.com/images/media/team/badge/ot7pjx1740775883.png" # RB
+            url = "https://r2.thesportsdb.com/images/media/team/badge/ot7pjx1740775883.png"
             
         if not url:
             for key, val in mapping.items():
@@ -524,23 +484,18 @@ class RaceOrchestrator:
                     url = val
                     break
         
-        # If no mapping found, return a generic fallback
         if not url:
-             url = f"https://media.formula1.com/content/dam/fom-website/teams/{self.year}/generic.png"
+            url = f"https://media.formula1.com/content/dam/fom-website/teams/{self.year}/generic.png"
              
         return url
 
     def _get_driver_image_url(self, driver_code: str) -> str:
-        """Returns a high-quality headshot URL for the driver, updated for the season."""
-        # 0. Override for rookies since F1 currently returns a blank silhouette
         if driver_code == "LIN":
             return "/lin.png"
 
-        # 1. Try our cached FastF1 URL first (most reliable)
         if driver_code in self.driver_images:
             return self.driver_images[driver_code]
             
-        # 2. Legacy fallback slugs (kept as secondary backup)
         slugs = {
             "VER": "max-verstappen", "PER": "sergio-perez", "HAM": "lewis-hamilton",
             "RUS": "george-russell", "LEC": "charles-leclerc", "SAI": "carlos-sainz",
