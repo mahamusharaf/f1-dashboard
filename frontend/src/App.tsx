@@ -85,7 +85,7 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="h-screen overflow-hidden bg-f1-dark text-f1-light flex flex-col p-2 sm:p-4 md:p-6 w-full">
+    <div className="min-h-screen lg:h-screen bg-f1-dark text-f1-light flex flex-col p-2 sm:p-4 md:p-6 w-full overflow-y-auto lg:overflow-hidden">
       {/* Header */}
       <header className="flex flex-col lg:flex-row justify-between items-center mb-6 gap-4 shrink-0 bg-white/5 p-4 rounded-xl border border-white/10">
         <div className="flex flex-col items-center lg:items-start text-center lg:text-left">
@@ -174,7 +174,7 @@ const App: React.FC = () => {
       </header>
 
       {/* Main Grid */}
-      <div className="flex-1 flex flex-col lg:grid lg:grid-cols-12 gap-4 h-full min-h-0 lg:overflow-hidden overflow-hidden">
+      <div className="flex-1 flex flex-col lg:grid lg:grid-cols-12 gap-4 lg:h-full min-h-0 lg:overflow-hidden">
 
         {/* Desktop Left / Mobile Bottom Row Section (Leaderboard & Card) */}
         {/* On mobile, we only show Mini Timing in the top row, so this full version is lg-only for the left column */}
@@ -191,10 +191,10 @@ const App: React.FC = () => {
         </div>
 
         {/* Right Column (Desktop) / Main Area (Mobile) */}
-        <div className="col-span-12 lg:col-span-7 h-full flex flex-col gap-2 sm:gap-4 min-h-0 overflow-hidden">
+        <div className="col-span-12 lg:col-span-7 lg:h-full flex flex-col gap-2 sm:gap-4 min-h-0 lg:overflow-hidden">
           
           {/* Mobile Top Row: Map + Mini Leaderboard */}
-          <div className="flex lg:hidden h-[45%] sm:h-[40%] gap-2 shrink-0">
+          <div className="flex lg:hidden h-[300px] sm:h-[360px] gap-2 shrink-0">
             <div className="flex-[3] bg-f1-gray/20 rounded-xl border border-white/5 relative overflow-hidden">
               <TrackMap 
                 circuitPath={raceState.circuitPath}
@@ -243,7 +243,7 @@ const App: React.FC = () => {
           
           {/* Driver Details (Mobile Only - Small strip) */}
           {selectedDriver && (
-            <div className="lg:hidden h-20 shrink-0 animate-slide-in-up">
+            <div className="lg:hidden h-20 shrink-0 animate-slide-in-up sticky bottom-2 z-20">
                <div className="bg-f1-gray/40 backdrop-blur-md rounded-xl p-2 border border-white/10 h-full flex items-center gap-3 shadow-2xl relative">
                   <button 
                     onClick={() => setSelectedDriverCode(null)}
