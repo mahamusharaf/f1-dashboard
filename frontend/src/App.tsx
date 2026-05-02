@@ -237,7 +237,7 @@ const App: React.FC = () => {
           </div>
 
           {/* Commentary (Shared) */}
-          <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+          <div className="min-h-[280px] lg:flex-1 lg:min-h-0 flex flex-col lg:overflow-hidden">
             <CommentaryFeed events={raceState.events} />
           </div>
           

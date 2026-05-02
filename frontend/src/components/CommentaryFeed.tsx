@@ -46,13 +46,13 @@ const CommentaryFeed: React.FC<Props> = ({ events }) => {
   };
 
   return (
-    <div className="bg-f1-gray/30 rounded-xl p-3 sm:p-4 shadow-xl border border-white/5 h-full flex flex-col">
+    <div className="bg-f1-gray/30 rounded-xl p-3 sm:p-4 shadow-xl border border-white/5 flex flex-col h-full">
       <h2 className="text-lg sm:text-xl font-bold mb-2 sm:mb-4 flex items-center gap-2 uppercase tracking-tighter">
         <span className="w-1.5 sm:w-2 h-5 sm:h-6 bg-f1-red rounded-sm"></span>
         Live Commentary
       </h2>
       
-      <div ref={scrollRef} className="flex-1 overflow-y-auto pr-2 space-y-2 scrollbar-hide">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto pr-2 space-y-2 scrollbar-hide max-h-[260px] lg:max-h-none">
         {events.length === 0 ? (
           <div className="text-center py-8 text-white/40 italic">Awaiting session...</div>
         ) : (
